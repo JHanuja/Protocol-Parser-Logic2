@@ -1,0 +1,98 @@
+= Protocol Parser for Software https://www.saleae.com/downloads/[Logic 2] of the company Saleae
+
+Johannes Hanuja <joha1003@stud.hs-kl.de>
+
+
+
+== Overview
+
+The Software https://www.saleae.com/downloads/[Logic 2] has an extension Tab where Developers can create their own Extensions for the software with the python programming language. This document contains an overview about a possibility for creating High Level Analyzers using the API of the https://www.saleae.com/downloads/[Logic 2]-Software. A concrete implementation of a Protocol Parser can be found in this https://github.com/JHanuja/Saleae-Logic-2-Mavlink-Extension[Github Repository], which contains a Parser for the Mavlink Protocol. 
+
+=== The general functionality of a Parser extension
+
+The Api consists of a method with the following Signature:
+
+[source,python]
+def decode(self, frame: AnalyzerFrame)
+ 
+An Analyzer frame has a start_time and end_time and the method gets called for every byte in the stream. Reading the value of an Analyzer Frame as an integer can be done in the following way:
+
+[source,python]
+int.from_bytes(frame.data['data'],"little")
+
+We need to define result types in order to create our own Analyzer Frames which get displayed in the Software. A simple example for a Result Type can be defined as follows:
+
+[source,python]
+'Field': {'format': 'Field:{{data.name}}, Value:{{data.input}}'}
+
+In order to show how to create an Analyzer Frame for a specific Byte (frame) in the stream, see the following example:
+
+[source,python]
+AnalyzerFrame('Field',frame.start_time,frame.end_time,{
+                        'name': "Buffer",
+                        'input': int.from_bytes(frame.data['data'],"little")
+                    })
+
+
+=== Creating a parser for a typical Protocol
+Let's assume we want to parse a packet of a typical protocol which starts with a field of a specific value (STX) and ends with a checksum. The first thing we need is a class which represents a field:
+
+[source,python]
+class Field(object):
+      def __init__(self,start_time,end_time,value):
+        self.start_time = start_time
+        self.end_time = end_time
+        self.value = value`
+
+Then we need a global list for all field series which could be a valid packet and the definition of the STX Value
+
+[source,python]
+STX = 254
+allFieldSeries = []
+
+
+Let's implement the decode function as follows:
+
+[source,python]
+def decode(self, frame: AnalyzerFrame):
+        if (int.from_bytes(frame.data['data'],"little")) == STX:
+            field = Field(frame.start_time,frame.end_time,(int.from_bytes(frame.data['data'],"little")))
+            for fieldSeries in self.allFieldSeries:
+                fieldSeries.append(field)
+            newFieldSeries = []
+            newFieldSeries.append(field)
+            self.allFieldSeries.append(newFieldSeries)
+        else:
+            field = Field(frame.start_time,frame.end_time,(int.from_bytes(frame.data['data'],"little")))
+            for fieldSeries in self.allFieldSeries:
+                fieldSeries.append(field)
+        frame = self.createFramesIfValid()
+        return frame
+
+A packet always starts with the value of STX. So basically in the if case we append the field to every existing fieldseries which could be a valid packet. We also start a new fieldseries and append this fieldseries to the global list of fieldseries. The reason for doing that is because the STX value can appear as a value in a packet as well. 
+
+In the else case we just add the new field to all existing field series. 
+
+Let's have a look at the method createFrameIfValid.
+
+[source,python]
+def createFramesIfValid(self):
+        values = []
+        for fieldSeries in self.allFieldSeries:
+            for field in fieldSeries:
+                values.append(packet.value)   
+                f = Decoder()
+            try: 
+                tested = f.decode(bytearray(values))
+                self.allFieldSeries.clear()
+                return self.createFrames(tested,fieldSeries)
+            except:
+                values.clear()
+                return []
+
+So basically we check all our fieldseries for a valid packet by using a protocol specific Decoder. The decoder throws an Exception if the fieldseries is not a valid packet. Otherwise it returns the decoded packet. If no exception is thrown, we have a valid packet and we can delete all existing fieldseries. After that we call a protocol specific Method createFrames with the decoded message and the corresponding fieldseries as arguments. In this method we have all necessary information to create the protocol specific frames. 
+
+
+
+
+
